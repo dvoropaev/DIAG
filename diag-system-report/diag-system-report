@@ -1,70 +1,182 @@
 #!/bin/bash
 
+set -euo pipefail
+
 . shell-getopt
 
 PROG="diag-system-report"
 VERSION=
 
+TESTS=(
+    check_system_report_binary
+    check_system_data_sources
+    check_system_diagnostic_context
+    test_report_generation
+)
+
 show_usage()
 {
     echo "Diagnostic Tool for collecting system information"
     echo ""
-    echo "Usage: diag-system-report [options]"
+    echo "Usage: diag-system-report [options] [<check/test-function-name>]"
     echo ""
     echo "Options:"
-    echo "  -h, --help			This message"
-    echo "  -l, --list			List of tests"
-    echo "  -V, --version		Write version"
-    echo "  -r, --report		Write verbose output to file"
+    echo "  -h, --help            This message"
+    echo "  -l, --list            List of tests"
+    echo "  -V, --version         Write version"
+    echo "  -r, --report          Write verbose output to file"
     echo ""
-    echo "Example: "
+    echo "Example:"
+    echo "diag-system-report test_report_generation"
     echo "diag-system-report -r > report.tar.xz"
     echo ""
-    exit 0;
+    exit 0
 }
 
 version()
 {
     echo "diag-system-report version: ${VERSION}"
-    exit 0;
+    exit 0
+}
+
+create_report_archive() {
+    local current_date archive_name compressed_archive
+    current_date=$(date +"%Y-%m-%d_%H:%M")
+    archive_name="/tmp/report_$current_date.tar"
+    compressed_archive="${archive_name}.xz"
+
+    /usr/bin/system-report -o "${archive_name}" > /dev/null 2>&1
+
+    if test ! -s "${compressed_archive}"; then
+        echo "Report archive was not created: ${compressed_archive}" >&2
+        return 1
+    fi
+
+    printf '%s\n' "${compressed_archive}"
 }
 
 report() {
-    current_date=$(date +"%Y-%m-%d_%H:%M")
-    archive_name="/tmp/report_$current_date.tar"
-    trap 'rm -f "${archive_name}.xz"' EXIT
-    /usr/bin/system-report -o ${archive_name}  > /dev/null 2>&1
-    cat "${archive_name}.xz"
+    local compressed_archive
+    compressed_archive=$(create_report_archive)
+    trap 'rm -f "${compressed_archive}"' EXIT
+    cat "${compressed_archive}"
 }
 
 list() {
-	echo ""
-	exit 0;
+    printf '%s\n' "${TESTS[@]}"
+    exit 0
 }
 
-OPTION_LIST="help,list,version,report:"
+check_system_report_binary() {
+    if test -x /usr/bin/system-report; then
+        echo "/usr/bin/system-report is available"
+        return 0
+    fi
 
+    echo "/usr/bin/system-report is missing or not executable" >&2
+    return 1
+}
+
+check_system_data_sources() {
+    local missing=0
+    local path
+
+    for path in /proc /sys /tmp; do
+        if test -e "$path"; then
+            echo "$path is available"
+        else
+            echo "$path is missing" >&2
+            missing=1
+        fi
+    done
+
+    if command -v rpm >/dev/null 2>&1; then
+        echo "rpm is available"
+    else
+        echo "rpm command is missing" >&2
+        missing=1
+    fi
+
+    if command -v journalctl >/dev/null 2>&1 || test -r /var/log/messages || test -r /var/log/syslog; then
+        echo "system logs are available"
+    else
+        echo "system logs are unavailable" >&2
+        missing=1
+    fi
+
+    return "$missing"
+}
+
+check_system_diagnostic_context() {
+    local failure=0
+
+    if test -w /tmp; then
+        echo "/tmp is writable"
+    else
+        echo "/tmp is not writable" >&2
+        failure=1
+    fi
+
+    if test -r /proc && test -r /sys; then
+        echo "required kernel data sources are readable"
+    else
+        echo "required kernel data sources are not readable" >&2
+        failure=1
+    fi
+
+    echo "running as uid $(id -u)"
+
+    return "$failure"
+}
+
+test_report_generation() {
+    local compressed_archive
+    compressed_archive=$(create_report_archive) || return 1
+    trap 'rm -f "${compressed_archive}"' RETURN
+
+    if xz -t "${compressed_archive}" >/dev/null 2>&1; then
+        echo "report archive is readable: ${compressed_archive}"
+        return 0
+    fi
+
+    echo "report archive is corrupted: ${compressed_archive}" >&2
+    return 1
+}
+
+run_test() {
+    local func="$1"
+
+    case " ${TESTS[*]} " in
+        *" ${func} "*)
+            "$func"
+            ;;
+        *)
+            echo "Unknown test: ${func}" >&2
+            return 1
+            ;;
+    esac
+}
+
+OPTION_LIST="help,list,version,report"
 OPTION_SHORT_LIST="h,l,V,r"
 
 TEMP=$(getopt -n "$PROG" -o "$OPTION_SHORT_LIST" -l "$OPTION_LIST" -- "$@")
 eval set -- "$TEMP"
 
-
 while :; do
   case "$1" in
-    -h | --help) show_usage
-    ;;
-    -l | --list) list
-    ;;
-    -V | --version) version
-    ;;
-    -r | --report) report
-    ;;
-    *) echo "Unrecognized option: $1" ; show_usage ; exit 1
-    ;;
+    -h | --help) show_usage ;;
+    -l | --list) list ;;
+    -V | --version) version ;;
+    -r | --report) report; exit $? ;;
+    --) shift; break ;;
+    *) echo "Unrecognized option: $1" >&2; show_usage ;;
   esac
-  shift
 done
 
+if test $# -gt 0; then
+    run_test "$1"
+    exit $?
+fi
 
-
+show_usage

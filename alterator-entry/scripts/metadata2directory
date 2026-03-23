@@ -1,0 +1,137 @@
+#!/usr/bin/python3
+import alterator_entry as ae
+
+import os
+import sys
+import platform
+import argparse
+import tomlkit
+import fnmatch
+
+EDITIONS_DIR = os.getenv("ALTERATOR_EDITIONS_DIR", "/usr/share/alterator/editions")
+COMPONENTS_DIR = os.getenv(
+    "ALTERATOR_COMPONENTS_DIR", "/usr/share/alterator/components"
+)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--outdir",
+        "-o",
+        help="Directory for outputting work results",
+        default="/tmp",
+    )
+    parser.add_argument(
+        "--arch",
+        "-a",
+        metavar="ARCH",
+        help="Architecture to extract packages for",
+        default=platform.machine(),
+    )
+    parser.add_argument(
+        "--kflavours",
+        "-k",
+        help="Kernel(s) to extract packages for",
+        default=["6.12"],
+        nargs="+",
+    )
+    parser.add_argument(
+        "--desktop",
+        "-d",
+        help="Desktop environment to extract packages for",
+        default="GNOME",
+    )
+    parser.add_argument(
+        "--language",
+        "-l",
+        help="Language to extract packages for",
+        default="ru",
+    )
+    parser.add_argument(
+        "files",
+        help="edition files to extract components from sections.features",
+        nargs="*",
+    )
+    args = parser.parse_args()
+
+    if not os.path.isdir(f"{args.outdir}") or not os.access(f"{args.outdir}", os.W_OK):
+        print(f"ERROR: {args.outdir} is not a writable directory", file=sys.stderr)
+        exit(1)
+
+    if args.files:
+        edition_files = args.files
+    else:
+        edition_files = []
+        for dirname in os.listdir(EDITIONS_DIR):
+            if not fnmatch.fnmatch(dirname,"edition_*"):
+                continue
+            if not os.path.isdir(f"{EDITIONS_DIR}/{dirname}"):
+                continue
+            expected_filename = f"{EDITIONS_DIR}/{dirname}/{dirname}.edition"
+            if os.path.isfile(expected_filename):
+                edition_files.append(expected_filename)
+            else:
+                print(
+                    f"WARNING: expected file {expected_filename} does not exists",
+                    file=sys.stderr,
+                )
+
+    for file in edition_files:
+        with open(file, "rb") as f:
+            edition_data = tomlkit.load(f)
+
+        sections = edition_data["sections"].value
+        if "features" not in sections:
+            continue
+        section = sections["features"]
+        components = section["components"]
+
+        for component_name in components:
+            component_name = component_name.strip()
+            component_file = f"{COMPONENTS_DIR}/{component_name}/{component_name}.component"
+            try:
+                with open(component_file, "rb") as f:
+                    component_data = tomlkit.load(f)
+            except FileNotFoundError as e:
+                print(
+                    f'WARNING: component "{component_name}" not found: {e}',
+                    file=sys.stderr,
+                )
+                continue
+
+            directory_file = f"{args.outdir}/groups/{edition_data['name']}/{component_data['name']}.directory"
+            os.system(f"mkdir -p {args.outdir}/groups/{edition_data['name']}")
+            with open(directory_file, "w") as f:
+                f.write(
+                    f"[Desktop Entry]\n"
+                    f"Encoding=UTF-8\n"
+                    f"Type=Directory\n"
+                    f"Name={component_data['display_name']['en']}\n"
+                    f"X-Alterator-PackageList={edition_data['name']}/{component_data['name']}\n"
+                    f"X-Alterator-Required=no\n"
+                    f"Name[ru_RU]={component_data['display_name']['ru']}\n"
+                )
+            f.close()
+
+            component_pkgs = ae.extract_packages_from_component(
+                component_data["packages"].value,
+                ae.PackagesFilterOptions(
+                    kflavours=args.kflavours,
+                    arch=args.arch,
+                    section=None,
+                    desktop=args.desktop,
+                    language=args.language,
+                    image_ignore=True,
+                ),
+            )
+            pkgs = set()
+            pkgs.update(component_pkgs)
+
+            list_file = f"{args.outdir}/lists/{edition_data['name']}/{component_data['name']}"
+            os.system(f"mkdir -p {args.outdir}/lists/{edition_data['name']}")
+            with open(list_file, "w") as f:
+                print(*sorted(pkgs), sep='\n', file=f)
+            f.close()
+
+if __name__ == "__main__":
+    main()

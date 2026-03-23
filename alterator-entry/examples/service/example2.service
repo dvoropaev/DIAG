@@ -1,0 +1,57 @@
+type = "Service"
+name = "example2_service"
+icon = "example2_service_icon"
+display_name.en = "Example2 service"
+display_name.ru = "Пример2 сервиса"
+available_actions = [
+    "deploy",
+    "configure",
+    # "backup",
+    # "restore",
+    "undeploy"
+]
+
+
+[parameters.password]
+display_name.en = "Пароль Администратора"
+display_name.ru = "Administrator Password"
+type = "string"
+password = true
+pattern = "^(?=.*?[A-Z])(?=.*?[a-z])(?=.*?[0-9])(?=.*?[#?!@$%^&*-]).{8,}$"
+validation_hint.en = """The password should not be shorter than 8 symbols and contain at least:
+- one low-case and upper-case letter
+- one spetial symbol (#?!@$%^&*-)
+"""
+validation_hint.ru = """Длина пароль должна быть не менее 8 символов, он должен содержать:
+- хотя бы 1 прописную и 1 заглавную букву
+- хотя бы 1 спец.символ (#?!@$%^&*-)
+"""
+required = [
+    "deploy"
+]
+context = [
+    "deploy",
+]
+
+[parameters.predeploy]
+type = "boolean"
+default = true
+constant = true
+context = [
+    "diag"
+]
+
+[parameters.realm]
+display_name.en = "REALM"
+display_name.ru = "REALM"
+type = "string"
+context = [
+    "deploy",
+    "diag"
+]
+
+[resources.config]
+display_name.en = "Configuration file"
+display_name.ru = "Файл конфигурации"
+type = "file"
+path.value = "/ect/param.conf"

@@ -1,0 +1,267 @@
+type = "Service"
+name = "example_service"
+icon = "example_service_icon"
+display_name.en = "example service"
+display_name.ru = "Пример сервиса"
+comment.en = "This is an example service"
+comment.ru = "Это пример сервиса"
+enable_force_deploy = true
+
+
+[diag_tools.test_tool]
+bus = "session"
+path = "/org/altlinux/alterator/test_tool"
+
+[diag_tools.test_tool2]
+bus = "system"
+path = "/org/altlinux/alterator/test_tool2"
+
+
+[parameters.enumParam]
+display_name.en = "Some parameter name"
+display_name.ru = "Параметр"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "enum" # string|integer|enum
+context = [
+    "deploy",
+    "diag",
+    "status"
+]
+[parameters.enumParam.values.value1]
+display_name.en = "Value 1"
+display_name.ru = "Значение 1"
+[parameters.enumParam.values.value2]
+display_name.en = "Value 2"
+display_name.ru = "Значение 2"
+[parameters.enumParam.values.value3]
+display_name.en = "Value 3"
+display_name.ru = "Значение 3"
+
+[parameters.emptyParam]
+display_name.en = "Some parameter name"
+display_name.ru = "Параметр"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "string" # string|integer|enum|boolean
+context = [
+    "deploy",
+    "diag",
+    "status"
+]
+
+[parameters.paramWithDefault]
+display_name.en = "Some parameter name"
+display_name.ru = "Параметр"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "string" # string|integer|enum|boolean
+default = "default_value"
+context = [
+    "deploy",
+    "diag"
+]
+
+# An array of strings, constrainted by a regular expression
+[parameters.hostList]
+display_name.en = "A list of servers"
+display_name.ru = "Список серверов"
+comment.en = "A list of servers, that will be used by this service for updating some important data"
+comment.ru = "Перечень серверов для обновления важных данных"
+type = "array"
+array_type = "string"
+array_min  = 1
+array_max  = 10
+array_label.en = "Server"
+array_label.ru = "Сервер"
+# This scary regex matches a valid IPv4/IPv6 or a domain name.
+# Examples:
+#   altlinux.org                              [valid]
+#   www.altlinux.org                          [valid]
+#   one.two.three.four.etc.mysite.com         [valid]
+#   127.0.0.1                                 [valid]
+#   2001:0db8:85a3:0000:0000:8a2e:0370:7334   [valid]
+#
+#   192.168.0.9999                            [invalid]
+#   255.255.255.255.255                       [invalid]
+#   .example.com                              [invalid]
+#   example-.com                              [invalid]
+#   test                                      [invalid]
+#
+# Note: \ should be escaped in toml
+pattern = "^((?:(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))|(?:[a-fA-F0-9]{1,4}(?::[a-fA-F0-9]{1,4}){7}|(?:(?:[a-fA-F0-9]{1,4}:){0,6}[a-fA-F0-9]{1,4})?::(?:(?:[a-fA-F0-9]{1,4}:){0,6}[a-fA-F0-9]{1,4})?)|(?![-.])(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\\.)+[a-zA-Z]{2,}(?<![-.]))$"
+
+# While "comment" explains what does this parameter do,
+# the "validation_hint" will explain why user's input may be invalid.
+# Instead of overloading "comment" with the following explaination,
+# let's only show it when user's input is not invalid.
+validation_hint.en = """The string should contain a valid server identifier, one of the following:
+- IPv4 address: 4 numbers 0-255, delimited by a dot
+- IPv6 address: 8 groups of four hexadecimal numbers separated by a colon
+- domain name: 2 or more strings, delimited by a dot
+"""
+validation_hint.ru = """Строка должна содержать корректный идентификатор сервера, которым может быть:
+- IPv4 адрес: 4 числа от 0 до 255, разделённых точками
+- IPv6 адрес: 8 групп из четырёх шестнадцатеричных чисел, разделённых двоеточием
+- Доменное имя: 2 или более строки, разделённых точками
+"""
+default = [ "altlinux.org", "kernel.org", "www.foo.bar" ]
+context = [
+    "deploy",
+    "diag"
+]
+
+
+
+[parameters.composite_param]
+display_name.en = "Some composite parameter name"
+display_name.ru = "Имя составного параметра"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "object"
+context = [
+    "deploy",
+    "status"
+]
+[parameters.composite_param.properties.string_1]
+display_name.en = "String field"
+display_name.ru = "Поле типа строка"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "string"
+required = true
+
+[parameters.composite_param.properties.enum_1]
+display_name.en = "Enum field"
+display_name.ru = "Поле типа перечисление"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "enum"
+required = true
+[parameters.composite_param.properties.enum_1.values.value1]
+display_name.en = "Value 1"
+display_name.ru = "Значение 1"
+[parameters.composite_param.properties.enum_1.values.value2]
+display_name.en = "Value 2"
+display_name.ru = "Значение 2"
+[parameters.composite_param.properties.enum_1.values.value3]
+display_name.en = "Value 3"
+display_name.ru = "Значение 3"
+
+
+[parameters.composite_param.properties.int_1]
+display_name.en = "Integer field"
+display_name.ru = "Поле типа число"
+comment.en = "This field is not required"
+comment.ru = "Это поле необязательное"
+type = "integer"
+required = false
+
+
+[parameters.composite_array]
+display_name.en = "Some composite array parameter name"
+display_name.ru = "Имя составного массива"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "array"
+array_type = "object"
+array_label.en = "Composite parameter"
+array_label.ru = "Составной параметр"
+prototype = "composite_param"
+array_min  = 3
+array_max  = 10
+context = [
+    "deploy",
+    "status"
+]
+
+
+[parameters.complex_enum]
+display_name.en = "Complex enum"
+display_name.ru = "Перечисление с подпараметрами"
+comment.en = "Enum values may contain subparameters"
+comment.ru = "Значения enum могут содержать подпараметры"
+type = "enum"
+context = [
+    "deploy",
+    "status"
+]
+[parameters.complex_enum.values.param1]
+display_name.en = "Variant 1"
+display_name.ru = "Вариант 1"
+comment.en = "This is a simple enum value"
+comment.ru = "Простое значение enum"
+[parameters.complex_enum.values.param2]
+display_name.en = "Variant 2"
+display_name.ru = "Вариант 2"
+comment.en = "When this variant is selected, additional parameters are available."
+comment.ru = "Этот вариант содержит дополнительные параметры."
+[parameters.complex_enum.values.param3.properties.string_subparameter]
+display_name.en = "String subparameter"
+display_name.ru = "Строковый подпараметр"
+comment.en = "Required string parameter, that appears only when 'Variant 2' of enum is selected"
+comment.ru = "Обязятельный строковый параметр, появляется только когда выбран 'Вариант 2' для enum"
+type = "string"
+required = true
+[parameters.complex_enum.values.param3]
+display_name.en = "Composite parameter array example"
+display_name.ru = "Пример массива составных параметров"
+comment.en = "This parameter consist of different values"
+comment.ru = "Этот параметр состоит из различных значений"
+[parameters.complex_enum.values.param3.properties.array_subparameter]
+display_name.en = "Array subparameter"
+display_name.ru = "Подпараметр-массив"
+comment.en = "Non-required array parameter, that appears only when 'Variant 3' of enum is selected"
+comment.ru = "Необязятельный параметр-массив, появляется только когда выбран 'Вариант 3' для enum"
+type = "array"
+array_type = "object"
+array_min = 2
+array_max = 10
+prototype = "sample_composite"
+required = false
+
+
+
+
+
+[parameters.linkedParam]
+display_name.en = "Some linked parameter name"
+display_name.ru = "Имя связанного параметра"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "integer" # string|integer|enum|boolean
+default = 80
+min = 0
+max = 65535
+context = [
+    "deploy",
+    "status"
+]
+
+
+[resources.file]
+display_name.en = "Some resource name"
+display_name.ru = "Ресурс"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "file" # or directory
+path.value = "/some/path"
+
+[resources.unit]
+display_name.en = "Some service name"
+display_name.ru = "Имя сервиса"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "systemd_unit"
+unit_name.value = "some.service"
+
+[resources.port]
+display_name.en = "Some port"
+display_name.ru = "Порт"
+comment.en = "Comment"
+comment.ru = "Комментарий"
+type = "port"
+inet_service.value = 80
+inet_service.parameter = "linkedParam"
+tcp = true
+udp = false

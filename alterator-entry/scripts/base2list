@@ -1,0 +1,145 @@
+#!/usr/bin/python3
+import alterator_entry as ae
+
+import os
+import sys
+import platform
+import argparse
+import fnmatch
+
+EDITIONS_DIR = os.getenv("ALTERATOR_EDITIONS_DIR", "/usr/share/alterator/editions")
+COMPONENTS_DIR = os.getenv(
+    "ALTERATOR_COMPONENTS_DIR", "/usr/share/alterator/components"
+)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--outdir",
+        "-o",
+        help="Directory for outputting work results",
+        default="/tmp",
+    )
+    parser.add_argument(
+        "--baselists",
+        "-b",
+        help="List names for base parts of editions in the format edition_*/base",
+        default=None,
+        nargs="+",
+    )
+    parser.add_argument(
+        "--sections",
+        "-s",
+        help="Section(s) whose packages must be in the edition_*/base lists",
+        default=["base"],
+        nargs="+",
+    )
+    parser.add_argument(
+        "--internals",
+        "-i",
+        help="Internal section(s) whose packages must be in the edition_*/base lists",
+        default=[None],
+        nargs="+",
+    )
+    parser.add_argument(
+        "--arch",
+        "-a",
+        metavar="ARCH",
+        help="Architecture to extract packages for",
+        default=platform.machine(),
+    )
+    parser.add_argument(
+        "--kflavours",
+        "-k",
+        help="Kernel(s) to extract packages for",
+        default=["6.12"],
+        nargs="+",
+    )
+    parser.add_argument(
+        "--desktop",
+        "-d",
+        help="Desktop environment to extract packages for",
+        default="GNOME",
+    )
+    parser.add_argument(
+        "--language",
+        "-l",
+        help="Language to extract packages for",
+        default="ru",
+    )
+    args = parser.parse_args()
+
+    errorflag = False
+    if not os.path.isdir(f"{args.outdir}") or not os.access(f"{args.outdir}", os.W_OK):
+        print(f"ERROR: {args.outdir} is not a writable directory", file=sys.stderr)
+        errorflag = True
+
+    if not args.baselists:
+        print(f"ERROR: The required --baselists parameter is missing\n"
+            f"Specify the filenames for the edition base package lists "
+            f"after --baselists in the format edition_*/base",
+            file=sys.stderr)
+        errorflag = True
+
+    if errorflag:
+        exit(1)
+
+    wrongformat = []
+    for list in args.baselists:
+        if not fnmatch.fnmatch(list,"edition_*/base"):
+            wrongformat.append(list)
+
+    if wrongformat:
+        print(f"ERROR: The {wrongformat} list name does not match the edition_*/base "
+            f"format", file=sys.stderr)
+        exit(1)
+
+    noedition = []
+    for list in args.baselists:
+        dirname = list[:-5]
+        if not os.path.isfile(f"{EDITIONS_DIR}/{dirname}/{dirname}.edition"):
+            noedition.append(list)
+
+    if noedition:
+        print(f"ERROR: Unable to find a edition description for {noedition} "
+            f"specified in --baselists parameter", file=sys.stderr)
+        exit(1)
+
+    for dirname in [list[:-5] for list in args.baselists]:
+        expected_filename = f"{EDITIONS_DIR}/{dirname}/{dirname}.edition"
+        pkgs = set()
+        for section in args.sections:
+            options = ae.PackagesFilterOptions(
+                kflavours=args.kflavours,
+                arch=args.arch,
+                section=section,
+                desktop=args.desktop,
+                language=args.language,
+                image_ignore=False,
+            )
+
+            pkgs.update(ae.extract_packages_from_edition(expected_filename, options, COMPONENTS_DIR))
+
+        for internal in args.internals:
+            options = ae.PackagesFilterOptions(
+                kflavours=args.kflavours,
+                arch=args.arch,
+                section="",
+                desktop=args.desktop,
+                language=args.language,
+                image_ignore=False,
+                internal=internal,
+                internal_ignore=False,
+            )
+
+            pkgs.update(ae.extract_packages_from_edition(expected_filename, options, COMPONENTS_DIR))
+
+        list_file = f"{args.outdir}/lists/{dirname}/base"
+        os.system(f"mkdir -p {args.outdir}/lists/{dirname}")
+        with open(list_file, "w") as f:
+            print(*sorted(pkgs), sep='\n', file=f)
+        f.close()
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,94 @@
+name: Check current tag with Sisyphus
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  check-tag:
+    runs-on: alt-sisyphus
+    steps:
+      - name: Install packages
+        run: |
+          apt-get update && apt-get install -y jq
+
+      - name: Check out repository code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: master
+
+      - name: Get the newest tag from altlinux.space
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0)
+          echo "✅ Latest altlinux.space tag for ${{vars.PACKAGE_NAME}}: $LATEST_TAG"
+
+          echo "LATEST_TAG=$LATEST_TAG" >> $FORGEJO_ENV
+
+      - name: Get the newest tag from Sisyphus
+        run: |
+          source .forgejo/scripts/get_sisyphus_tag.sh
+
+          if get_sisyphus_version "${{vars.PACKAGE_NAME}}"; then
+            echo "SISYPHUS_TAG=$SISYPHUS_TAG" >> $FORGEJO_ENV
+          else
+            exit 1
+          fi
+
+      - name: Compare tag versions
+        run: |
+          if [ "$SISYPHUS_TAG" != "$LATEST_TAG" ]; then
+            echo "🔄 Versions are DIFFERENT - continuing"
+          else
+            echo "✅ Versions are IDENTICAL - stopping workflow"
+            echo "IS_DONE=true" >> $FORGEJO_ENV
+          fi
+
+      - name: Try automatic synchronization
+        if: env.IS_DONE != 'true'
+        run: |
+          PKG_NAME="${{vars.PACKAGE_NAME}}"
+          FIRST_LETTER=$(echo "${PKG_NAME:0:1}")
+          UPSTREAM_URL="git://git.altlinux.org/gears/$FIRST_LETTER/${{vars.PACKAGE_NAME}}.git"
+
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream
+
+          if git merge --ff-only upstream/sisyphus; then
+            LATEST_TAG=$(git tag --points-at=upstream/sisyphus --sort=-v:refname | grep -v '^gb' | head -n1)
+            git push origin
+            git push origin "$LATEST_TAG"
+
+            echo "✅ Automatic synchronization completed SUCCESSFULLY"
+            echo "IS_DONE=true" >> $FORGEJO_ENV
+          else
+            echo "❌ Automatic synchronization FAILED - try send email"
+          fi
+
+      - name: Fail workflow to trigger email notification
+        if: env.IS_DONE != 'true'
+        run: |
+          IFS=' ' read -ra recipients <<< "${{ vars.RECIPIENT_EMAIL }}"
+
+          curl_cmd="curl --url 'smtps://smtp.gmail.com:465'             --ssl-reqd             --mail-from '${{ secrets.SENDER_EMAIL }}'"
+
+          for recipient in "${recipients[@]}"; do
+            recipient=$(echo "$recipient" | xargs)
+            [ -n "$recipient" ] && curl_cmd="$curl_cmd --mail-rcpt '$recipient'"
+          done
+
+          curl_cmd="$curl_cmd --user '${{ secrets.SENDER_EMAIL }}:${{ secrets.SENDER_PASSWORD }}'"
+
+          cat > /tmp/email.txt << EOF
+          From: CI Notification Bot <${{ secrets.SENDER_EMAIL }}>
+          To: ${{ vars.RECIPIENT_EMAIL }}
+          Subject: 🚨 ${{vars.PACKAGE_NAME}}: Tag mismatch
+
+          Package: ${{ vars.PACKAGE_NAME }}
+          Version in altlinux.space: $LATEST_TAG
+          Version in Sisyphus: $SISYPHUS_TAG
+
+          Please synchronize the tags.
+          EOF
+
+          eval "$curl_cmd --upload-file /tmp/email.txt"

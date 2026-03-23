@@ -5,5 +5,30 @@ icon = "diag-system-report"
 report_suffix = "tar.xz"
 display_name.en = "System Report"
 display_name.ru = "Отчет System Report"
-comment.en = "The tool collects information about the operating system and the computer using the system-report utility.<br>Software information:<ul> <li>OS version</li> <li>Installed packages</li> <li>Network settings</li> </ul> Hardware information: <ul> <li>Storage devices</li><li>Network interfaces</li> <li>Kernel and kernel modules</li> <li>Kernel logs</li> </ul> This tool does not include a test suite. To use it, simply generate a report."
-comment.ru = "Инструмент собирает информацию об операционной системе и компьютере через утилиту system-report.<br>Сведения о программном обеспечении: <ul><li>Версия ОС</li><li>Установленные пакеты</li><li>Сетевые параметры</li></ul>Сведения об аппаратном обеспечении:<ul><li>Носители информации</li><li>Сетевые интерфейсы</li><li>Ядро и модули ядра</li><li>Логи ядра</li></ul> В данном инструменте отсутствует набор тестов. Для работы достаточно запустить генерацию отчета."
+comment.en = "The tool collects information about the operating system and the computer using the system-report utility.<br>Software information:<ul> <li>OS version</li> <li>Installed packages</li> <li>Network settings</li> </ul> Hardware information: <ul> <li>Storage devices</li><li>Network interfaces</li> <li>Kernel and kernel modules</li> <li>Kernel logs</li> </ul> The tool also provides system-level checks for report prerequisites and generation."
+comment.ru = "Инструмент собирает информацию об операционной системе и компьютере через утилиту system-report.<br>Сведения о программном обеспечении: <ul><li>Версия ОС</li><li>Установленные пакеты</li><li>Сетевые параметры</li></ul>Сведения об аппаратном обеспечении:<ul><li>Носители информации</li><li>Сетевые интерфейсы</li><li>Ядро и модули ядра</li><li>Логи ядра</li></ul> Инструмент также содержит системные проверки готовности окружения и формирования отчёта."
+
+
+[tests.check_system_report_binary]
+display_name.en = "Check system-report utility availability"
+display_name.ru = "Проверка наличия утилиты system-report"
+comment.en = "Checks whether the system-report utility is installed and executable."
+comment.ru = "Проверяет, что утилита system-report установлена и доступна для запуска."
+
+[tests.check_system_data_sources]
+display_name.en = "Check required system data sources"
+display_name.ru = "Проверка основных системных источников данных"
+comment.en = "Checks whether the core system data sources required to build the report are available."
+comment.ru = "Проверяет доступность основных системных источников данных, необходимых для формирования отчёта."
+
+[tests.check_system_diagnostic_context]
+display_name.en = "Check diagnostic permissions and context"
+display_name.ru = "Проверка прав и контекста системной диагностики"
+comment.en = "Checks whether the current execution context has enough permissions to collect a system report."
+comment.ru = "Проверяет, что текущий контекст выполнения имеет достаточные права для сбора системного отчёта."
+
+[tests.test_report_generation]
+display_name.en = "Check report generation"
+display_name.ru = "Проверка формирования отчёта"
+comment.en = "Checks whether a diagnostic report can actually be generated and opened as an archive."
+comment.ru = "Проверяет, что диагностический отчёт действительно можно сформировать и открыть как архив."

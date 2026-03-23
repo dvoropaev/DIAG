@@ -1,0 +1,720 @@
+#!/bin/sh -e
+# ***** BEGIN LICENSE BLOCK *****
+# * Copyright (C) 2007-2016  Alexey Gladkov <gladkov.alexey@gmail.com>
+# *
+# * This program is free software; you can redistribute it and/or modify
+# * it under the terms of the GNU General Public License as published by
+# * the Free Software Foundation; either version 2 of the License, or
+# * (at your option) any later version.
+# *
+# * This program is distributed in the hope that it will be useful,
+# * but WITHOUT ANY WARRANTY; without even the implied warranty of
+# * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# * GNU General Public License for more details.
+# *
+# * You should have received a copy of the GNU General Public License
+# * along with this program; if not, write to the Free Software
+# * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+# ***** END LICENSE BLOCK *****
+
+{
+	WITHOUT_RC_COMPAT=1
+	. /etc/init.d/functions
+} ||:
+
+. shell-error
+. shell-args
+
+cwd="$PWD"
+outfile=
+
+begin_msg() {
+	[ -z "$quiet" ] || return 0
+	[ -z "$*" ] || printf '%s ' "$*"
+}
+
+end_msg() {
+	[ -z "$quiet" ] || return 0
+	if [ "$BOOTUP" = color ]; then
+		local rc=$1
+		case "$rc" in
+			17) echo_passed ;;
+			0) echo_success ;;
+			*) echo_failure ;;
+		esac ||:
+	fi
+	echo
+}
+
+show_help() {
+	local rc="${1:-0}"
+	cat <<EOF
+
+$PROG - Collect hardware infomation.
+
+Usage: $PROG [options]
+
+Utility that gathers information about a system's hardware. The information
+can then be used for diagnostic purposes and debugging.
+
+Options:
+   --nothing           Disable all reports;
+   --[no-]save=LIST
+$(printf %s\\n "$save_env" |sed -e 's/^no_/   --[no-]/' -e 's/_/-/g')
+   -o, --outfile=FILE  Save report archive info <FILE>;
+   -q, --quiet         Try to be more quiet;
+   -v, --verbose       Print a message for each action;
+   -V, --version       Print program version and exit;
+   -h, --help          Show this message.
+
+EOF
+	exit "$rc"
+}
+
+print_version() {
+	cat <<EOF
+$PROG version $PROG_VERSION
+Written by Alexey Gladkov <gladkov.alexey@gmail.com>
+
+Copyright (C) 2007-2016  Alexey Gladkov <gladkov.alexey@gmail.com>
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+EOF
+	exit
+}
+
+timestamp() {
+	printf '# ' > "$1"
+	date >> "$1" 2>&1
+}
+
+workdir=
+exit_handler() {
+	local rc=$?
+	trap - EXIT
+	[ ! -d "$workdir" ] || rm -rf -- "$workdir"
+	exit $rc
+}
+
+################
+### Information
+################
+
+# Information about udev events in the system
+export no_save_udevtrigger=
+save_udevtrigger_msg='Obtaining kernel devices events'
+save_udevtrigger() {
+	[ -n "$udevtrigger" ] || return 17
+
+	local r='hardware/sysreport.udevtrigger'
+	timestamp "$r"
+	printf "# '$udevtrigger --dry-run --verbose' output\n\n" >> "$r"
+	$udevtrigger --dry-run --verbose >>"$r" 2>&1 || return
+}
+
+# Information about modules and device modaliases
+module_sysinfo() {
+	local path="$1" module= params=
+
+	module="${path##*/}"
+	if [ -d "$path/parameters" ]; then
+		for p in "$path/parameters"/*; do
+			[ "$p" != "$path/parameters/*" ] || break
+			[ -r "$p" ] &&
+				params="$params ${p##*/}=$(cat "$p")" ||
+				params="$params ${p##*/}=[ERROR: $p: Permission denied]"
+		done
+	fi
+	printf "%s\t%s\n" "$module" "$params"
+}
+
+modalias_info() {
+	local path="$1" p real_path
+	if [ ! -e "$path/driver" ]; then
+		printf "\t\n"
+		return
+	fi
+
+	if ! real_path="$(readlink -ev "$path/driver/module" 2>/dev/null)"; then
+		printf "\t\n"
+		return
+	fi
+
+	module_sysinfo "$real_path"
+}
+
+export no_save_modalias=
+save_modalias_msg='Obtaining modalias'
+save_modalias() {
+	[ -n "$udevtrigger" ] || return 17
+
+	local p r='hardware/sysreport.modalias'
+	timestamp "$r"
+	printf "# Format: <modalias><TAB><module><TAB><params>\n\n" >> "$r"
+	$udevtrigger --dry-run --verbose |
+	while read p; do
+		p="${p#/sys/}"
+		if [ -f "/sys/$p/modalias" ]; then
+			modalias="$(cat "/sys/$p/modalias")"
+			info="$(modalias_info "/sys/$p")"
+			printf "%s\t%s\n" "$modalias" "$info"
+		fi
+	done >> "$r"
+}
+
+# Information about kernel modules and params via /sys
+export no_save_modules=
+save_modules_msg='Obtaining kernel modules and params via /sys'
+save_modules() {
+	local r='hardware/sysreport.kmodules'
+	timestamp "$r"
+	printf '# Format: <module><TAB><params>\n\n' >> "$r"
+
+	local path=
+	for path in /sys/module/*; do
+		[ "$path" != "/sys/module/*" ] || break
+		module_sysinfo "$path" 2>&1
+	done >> "$r"
+}
+
+# List all PCI devices
+export no_save_lspci=
+save_lspci_msg='Obtaining PCI device list'
+save_lspci() {
+	local prog
+	prog="$(absolute lspci)" &&
+		[ -x $prog ] || return 17
+
+	local r='hardware/sysreport.lspci'
+	timestamp "$r"
+	printf "# 'lspci -vvnn' output\n\n" >> "$r"
+	LC_ALL=C $prog -vvnn >>"$r" 2>&1 || return
+}
+
+# Modules in the Linux Kernel
+export no_save_lsmod=
+save_lsmod_msg='Obtaining kernel modules list'
+save_lsmod() {
+	local prog
+	prog="$(absolute lsmod)" &&
+		[ -x $prog ] || return 17
+
+	local r='hardware/sysreport.lsmod'
+	timestamp "$r"
+	printf "# 'lsmod' output\n\n" >> "$r"
+	LC_ALL=C $prog >>"$r" 2>&1 || return
+}
+
+# Information from the kernel ring buffer
+export no_save_dmesg=
+save_dmesg_msg='Obtaining kernel ring buffer'
+save_dmesg() {
+	local r='hardware/sysreport.dmesg'
+	timestamp "$r"
+	printf "# 'dmesg' output\n\n" >> "$r"
+	dmesg >>"$r" 2>&1 || return
+}
+
+# Information from syslog (kern.*)
+export no_save_syslog_kern=
+save_syslog_kern_msg='Obtaining syslog kernel messages'
+save_syslog_kern() {
+	mkdir -p hardware/syslog/kernel
+
+	for f in info warnings errors; do
+		f="/var/log/kernel/$f"
+		[ ! -f "$f" ] ||
+			cp -f -- "$f" hardware/syslog/kernel/
+	done
+}
+
+export no_save_commoninfo=
+save_commoninfo_msg='Obtaining system information'
+save_commoninfo() {
+	mkdir hardware/proc
+
+	for n in \
+		cgroups            \
+		config.gz          \
+		cmdline            \
+		cpuinfo            \
+		crypto             \
+		devices            \
+		filesystems        \
+		interrupts         \
+		ioports            \
+		ksyms              \
+		mdstat             \
+		meminfo            \
+		partitions         \
+		slabinfo           \
+		stat               \
+		swaps              \
+		version            \
+		bus/input/devices  \
+		bus/input/handlers
+	do
+		[ -f "/proc/$n" ] || continue
+		if [ -z "${n##*/*}" ]; then
+			mkdir -p -- hardware/proc/"${n%/*}"
+			cp -a "/proc/$n" hardware/proc/"${n%/*}"
+		else
+			cp -a "/proc/$n" hardware/proc/
+		fi
+	done
+}
+
+# EVMS information
+export no_save_evmsinfo=
+save_evmsinfo_msg='Obtaining EVMS information'
+save_evmsinfo() {
+	local prog
+	prog="$(absolute evms_activate)" &&
+		[ -x $prog ] || return 17
+
+	local r='hardware/sysreport.evmsplugins'
+	timestamp "$r"
+	LC_ALL=C $prog >> "$r" 2>&1 || return
+
+	[ ! -s /var/log/evms-engine.log ] ||
+		cp -p /var/log/evms-engine.log hardware/sysreport.evms-engine.log
+
+	prog="$(absolute evms_query)" || return 0
+
+	printf "# 'evms_query plugins -i' output\n\n" >> "$r"
+	LC_ALL=C $prog plugins -i >> "$r" 2>&1 || return
+
+	r='hardware/sysreport.evms'
+	timestamp "$r"
+	printf "# 'evms_query info' output\n\n" >> "$r"
+	LC_ALL=C $prog info >> "$r" 2>&1 || return
+
+	printf "\n# 'evms_query disks' output\n" >> "$r"
+	LC_ALL=C $prog disks 2>&1 >> "$r" || return
+
+	local d
+	for d in `$prog disks`; do
+		printf "\n# 'evms_query volumes $d' output\n" >> "$r"
+		LC_ALL=C $prog volumes "$d" 2>&1 >> "$r" || return
+	done
+
+	for d in `$prog volumes`; do
+		printf "\n# 'evms_query info $d' output\n" >> "$r"
+		LC_ALL=C $prog info "$d" 2>&1 >> "$r" || return
+	done
+}
+
+# Partition table information via fdisk
+export no_save_fdisk=
+save_fdisk_msg='Obtaining FDISK information'
+save_fdisk() {
+	local prog
+	prog="$(absolute fdisk)" &&
+		[ -x $prog ] || return 17
+
+	local r='hardware/sysreport.fdisk'
+	timestamp "$r"
+	printf "# 'fdisk -l' output\n\n" >> "$r"
+	LC_ALL=C $prog -l >> "$r" 2>&1 || return
+}
+
+# Print detail of RAID devices.
+export no_save_raid=
+save_raid_msg='Obtaining RAID information'
+save_raid() {
+	local prog
+	prog="$(absolute mdadm)" &&
+		[ -x $prog -a -f /proc/mdstat ] || return 17
+
+	local mdlist
+	mdlist="$(sed -ne 's,^\(md[^[:space:]]\+\) :.*,/dev/\1,p' /proc/mdstat |
+		sort |
+		tr '\n' ' ')"
+	[ -n "$mdlist" ] || return 17
+
+	local r='hardware/sysreport.raid'
+	timestamp "$r"
+	printf "# 'mdadm --detail %s' output\n\n" "$mdlist" >> "$r"
+	LC_ALL=C $prog --detail $mdlist >> "$r" 2>&1 || return
+}
+
+# Attributes of a LVMs.
+export no_save_lvm=
+save_lvm_msg='Obtaining LVM information'
+save_lvm() {
+	local prog
+	prog="$(absolute lvm)" &&
+		[ -x $prog ] || return 17
+
+	local r='hardware/sysreport.lvm'
+	timestamp "$r"
+
+	for e in lvmdiskscan pvdisplay vgdisplay lvdisplay; do
+		if [ -x "/sbin/$e" ]; then
+			printf "\n# '%s' output\n\n" "$e" >> "$r"
+			"$e" >> "$r" 2>&1 || return
+		fi
+	done
+}
+
+# DDC/CI (Display Data Channel Command Interface)
+export no_save_ddcprobe=
+save_ddcprobe_msg='Obtaining DDC/CI monitor capabilities'
+save_ddcprobe() {
+	local prog
+	prog="$(absolute ddcutil)" &&
+		[ -x $prog ] || return 17
+
+	local r='hardware/sysreport.ddcutil'
+	timestamp "$r"
+	printf "# 'ddcutil' output\n\n" >> "$r"
+	LC_ALL=C $prog detect --verbose >> "$r" 2>&1 || return
+}
+
+# DMI (some say SMBIOS) table information
+export no_save_dmidecode=
+save_dmidecode_msg='Obtaining DMI table information'
+save_dmidecode() {
+	local prog
+	prog="$(absolute dmidecode)" &&
+		[ -x $prog -a -r /dev/mem ] || return 17
+
+	local r='hardware/sysreport.dmidecode'
+	timestamp "$r"
+	printf "# 'dmidecode' output\n\n" >> "$r"
+	LC_ALL=C $prog >> "$r" 2>&1 || return
+}
+
+# The "vital product data" information
+export no_save_vpddecode=
+save_vpddecode_msg='Obtaining vital product data'
+save_vpddecode() {
+	local prog
+	prog="$(absolute vpddecode)" &&
+		[ -x $prog -a -r /dev/mem ] || return 17
+
+	local r='hardware/sysreport.vpddecode'
+	timestamp "$r"
+	printf "# 'vpddecode' output\n\n" >> "$r"
+	LC_ALL=C $prog >> "$r" 2>&1 || return
+}
+
+# BIOS information
+export no_save_biosdecode=
+save_biosdecode_msg='Obtaining BIOS information'
+save_biosdecode() {
+	local prog
+	prog="$(absolute biosdecode)" &&
+		[ -x $prog -a -r /dev/mem ] || return 17
+
+	local r='hardware/sysreport.biosdecode'
+	timestamp "$r"
+	printf "# 'biosdecode' output\n\n" >> "$r"
+	LC_ALL=C $prog >> "$r" 2>&1 || return
+}
+
+# DSDT (Differentiated System Description Table)
+# This table contains the Differentiated Definition Block,
+# which supplies the information and configuration information
+# about the base system. It is always inserted into
+# the ACPI Namespace by the OS at boot time.
+export no_save_acpi_dsdt=
+save_acpi_dsdt_msg='Obtaining ACPI DSDT information'
+save_acpi_dsdt() {
+	[ -r /proc/acpi/dsdt ] || return 17
+
+	local r='hardware/sysreport.acpi-dsdt'
+	cp /proc/acpi/dsdt "$r" || return
+}
+
+export no_save_alsa_cards=
+save_alsa_cards_msg='Obtaining ALSA information'
+save_alsa_cards() {
+	[ -d /proc/asound ] || return 17
+
+	local r='hardware/sysreport.asound'
+	timestamp "$r"
+
+	local f='/proc/asound/cards'
+	printf "\n# 'cat %s'\n" "$f" >> "$r"
+	cat "$f" 2>&1 >> "$r" || return
+
+	find /proc/asound -iwholename '*/card*/codec#*' |
+	while read f; do
+		printf "\n# 'cat %s'\n" "$f" >> "$r"
+		cat "$f" 2>&1 >> "$r" || return
+	done
+	printf \\n >> "$r"
+
+}
+
+# List USB devices
+export no_save_lsusb=
+save_lsusb_msg='Obtaining USB device list'
+save_lsusb() {
+	local prog
+	prog="$(absolute lsusb)" &&
+		[ -x $prog ] || return 17
+
+	local r='hardware/sysreport.lsusb'
+	timestamp "$r"
+	printf "# 'lsusb' output\n\n" >> "$r"
+	LC_ALL=C $prog >> "$r" 2>&1 || return
+}
+
+# Print block device attributes
+export no_save_blkid=
+save_blkid_msg='Obtaining block device attributes'
+save_blkid() {
+	local prog
+	prog="$(absolute blkid)" &&
+		[ -x $prog ] || return 17
+
+	local r='hardware/sysreport.blkid'
+	timestamp "$r"
+	printf "# 'blkid' output\n\n" >> "$r"
+	LC_ALL=C $prog >> "$r" 2>&1 || return
+}
+
+export no_save_xorg_logs=
+save_xorg_logs_msg="Obtaining Xorg log files"
+save_xorg_logs() {
+	mkdir -p hardware/Xorg
+	local log rc=0
+	for log in /var/log/Xorg.*.log; do
+		[ "$log" != '/var/log/Xorg.*.log' ] || return 17
+		cp -a -- "$log" hardware/Xorg/ || rc=1
+	done
+	return $rc
+}
+
+export no_save_rpmlist=
+save_rpmlist_msg="Obtaining installed RPM packages"
+save_rpmlist() {
+	local prog
+	prog="$(absolute rpm)" &&
+		[ -x $prog ] || return 17
+
+	local r='system/sysreport.rpmlist'
+	$prog -qa --qf='%{name} %{version} %{release}\n' >"$r" || return
+	sort -o "$r" "$r"
+}
+
+export no_save_release=
+save_release_msg="Obtaining distribution release file"
+save_release() {
+	local f
+	mkdir system/etc
+	for f in /etc/*-release; do
+		[ ! -L "$f" ] && [ -f "$f" ] ||
+			continue
+		cp -aft system/etc/ -- "$f"
+	done
+}
+
+export no_save_network=
+save_network_msg="Obtaining network information"
+save_network() {
+	local prog_ip prog_ethtool
+
+	prog_ip="$(absolute ip)" &&
+		[ -x "$prog_ip" ] || return 17
+
+	local r='system/sysreport.ip-addr'
+	timestamp "$r"
+	printf "# 'ip addr' output\n\n" >> "$r"
+	$prog_ip addr >> "$r" 2>&1 || return
+
+	local r='system/sysreport.ip-route'
+	timestamp "$r"
+	printf "# 'ip route' output\n\n" >> "$r"
+	$prog_ip route >> "$r" 2>&1 || return
+
+	prog_ethtool="$(absolute ethtool)" &&
+		[ -x "$prog_ethtool" ] || return 0
+
+	r='system/sysreport.ethtool'
+	timestamp "$r"
+	printf "# 'ethtool -i <iface>' output\n\n" >> "$r"
+
+	$prog_ip -o link show up |
+	while read id iface dummy; do
+		iface="${iface%:}"
+		echo "### $iface ###"
+		$prog_ethtool -i "$iface" 2>&1 ||:
+		echo
+	done >>"$r"
+}
+
+export no_save_opengl=
+save_opengl_msg="Obtaining OpenGL/Vulkan information"
+save_opengl() {
+	local prog r processed
+	processed=
+
+	if prog="$(absolute glxinfo)" && [ -x "$prog" ]; then
+		r='hardware/sysreport.glxinfo'
+		timestamp "$r"
+		printf "# 'glxinfo -B' output\n\n" >> "$r"
+		$prog -B >> "$r" 2>&1 ||:
+		processed=1
+	fi
+
+	if prog="$(absolute vulkaninfo)" && [ -x "$prog" ]; then
+		r='hardware/sysreport.vulkaninfo'
+		timestamp "$r"
+		printf "# 'vulkaninfo --summary' output\n\n" >> "$r"
+		$prog --summary >> "$r" 2>&1 ||:
+		processed=1
+	fi
+
+	[ -n "$processed" ] ||
+		return 17
+}
+
+export no_save_video_acceleration=
+save_video_acceleration_msg="Obtaining video acceleration capabilities"
+save_video_acceleration() {
+	local prog r
+
+	if prog="$(absolute vainfo)" && [ -x "$prog" ]; then
+		r='hardware/sysreport.vainfo'
+		timestamp "$r"
+		printf "# 'vainfo' output\n\n" >> "$r"
+		$prog >> "$r" 2>&1 ||:
+		return
+	fi
+
+	return 17
+}
+
+export no_save_opencl=
+save_opencl_msg="Obtaining OpenCL information"
+save_opencl() {
+	local prog r processed
+	processed=
+
+	if prog="$(absolute clinfo)" && [ -x "$prog" ]; then
+		r='hardware/sysreport.clinfo'
+		timestamp "$r"
+		printf "# 'clinfo' output\n\n" >> "$r"
+		$prog >> "$r" 2>&1 ||:
+		processed=1
+	fi
+
+	if prog="$(absolute rocm-clinfo)" && [ -x "$prog" ]; then
+		r='hardware/sysreport.rocm-clinfo'
+		timestamp "$r"
+		printf "# 'rocm-clinfo' output\n\n" >> "$r"
+		$prog >> "$r" 2>&1 ||:
+		processed=1
+	fi
+
+	[ -n "$processed" ] ||
+		return 17
+}
+
+save_env="$(printenv |sed -ne 's/^\(no_save_[a-z_]\+\)=.*/\1/pg' |sort -u)"
+getopt_save="$(printf %s "$save_env" |sed -e 's/^no_//' |tr _ - |tr -s '[:space:]' ',')"
+getopt_no_save="$(printf %s "$save_env" |tr _ - |tr -s '[:space:]' ',')"
+TEMP=`getopt -n $PROG -o o:,$getopt_common_opts -l nothing,outfile:,save:,no-save:,$getopt_save,$getopt_no_save,$getopt_common_longopts -- "$@"` || show_usage
+eval set -- "$TEMP"
+while :; do
+	case "$1" in
+		--nothing)
+			for n in $save_env; do
+				eval "$n=1"
+			done
+			;;
+		--save|--no-save)
+			mode="$1"
+			shift
+			save_value=
+			[ -n "${mode##--no-save*}" ] || save_value=1
+			if [ -n "$(printf %s "$1" |tr -d '[:alpha:],[:space:]-')" ]; then
+				message "$mode: invalid argument: $1"
+				show_usage
+			fi
+			for arg in `printf %s "$1" |tr ,- \ _`; do
+				name="no_save_$arg"
+				if ! echo "$save_env" |grep -qs "^$name\$"; then
+					message "$mode: invalid argument: $arg"
+					show_usage
+				fi
+				eval "$name=$save_value"
+			done
+			;;
+		--save-|--no-save-) show_usage
+			;;
+		--save-[a-z]*)
+			arg="$(printf 'no_save_%s' "${1##--save-}" |tr - _)"
+			eval "$arg="
+			;;
+		--no-save-[a-z]*)
+			arg="$(printf 'no_save_%s' "${1##--no-save-}" |tr - _)"
+			eval "$arg=1"
+			;;
+		-o|--outfile) shift; outfile="$1"
+			;;
+		--) shift; break
+			;;
+		*) parse_common_option "$1"
+			;;
+	esac
+	shift
+done
+
+trap exit_handler HUP PIPE INT QUIT TERM EXIT
+workdir="`mktemp -dt "$PROG.XXXXXXXXXX"`"
+cd "$workdir"
+
+mkdir hardware system
+
+udevtrigger=
+if   type udevtrigger >/dev/null 2>&1; then
+	udevtrigger='udevtrigger'
+elif type udevadm >/dev/null 2>&1; then
+	udevtrigger='udevadm trigger'
+fi
+
+printenv |
+	sed -ne 's/^no_\(save_[a-z_]\+\)=.*/\1/pg' |
+	sort -u |
+while read f; do
+	eval "[ -z \"\$no_${f}\" ] || continue"
+	eval msg="\${${f}_msg:-Obtaining unknown information}"
+	begin_msg "$msg"
+	"$f" && rc=0 || rc=$?
+	end_msg "$rc"
+done
+
+[ -n "$(find -type f)" ] ||
+	exit 0
+
+[ -n "$outfile" ] ||
+	outfile="${cwd%/}/sysreport-$(date +"%Y%m%d").tar"
+
+archiver=cat
+for name in xz bzip2 gzip; do
+	type "$name" >/dev/null 2>&1 ||
+		continue
+
+	case "$name" in
+		xz)    suffix='.xz'  ;;
+		bzip2) suffix='.bz2' ;;
+		gzip)  suffix='.gz'  ;;
+	esac
+
+	archiver="$name -c"
+	outfile="$outfile$suffix"
+	break
+done
+
+begin_msg "Saving system information to ${outfile##*/}"
+tar -cO * | $archiver > "$outfile" && rc=0 || rc=$?
+end_msg "$rc"
+
+[ "$rc" = 0 ] ||
+	exit 1
+
+printf '\n\nPlease submit %s to sysreport@altlinux.org\n\n' "$outfile"

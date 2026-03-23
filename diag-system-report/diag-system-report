@@ -1,0 +1,70 @@
+#!/bin/bash
+
+. shell-getopt
+
+PROG="diag-system-report"
+VERSION=
+
+show_usage()
+{
+    echo "Diagnostic Tool for collecting system information"
+    echo ""
+    echo "Usage: diag-system-report [options]"
+    echo ""
+    echo "Options:"
+    echo "  -h, --help			This message"
+    echo "  -l, --list			List of tests"
+    echo "  -V, --version		Write version"
+    echo "  -r, --report		Write verbose output to file"
+    echo ""
+    echo "Example: "
+    echo "diag-system-report -r > report.tar.xz"
+    echo ""
+    exit 0;
+}
+
+version()
+{
+    echo "diag-system-report version: ${VERSION}"
+    exit 0;
+}
+
+report() {
+    current_date=$(date +"%Y-%m-%d_%H:%M")
+    archive_name="/tmp/report_$current_date.tar"
+    trap 'rm -f "${archive_name}.xz"' EXIT
+    /usr/bin/system-report -o ${archive_name}  > /dev/null 2>&1
+    cat "${archive_name}.xz"
+}
+
+list() {
+	echo ""
+	exit 0;
+}
+
+OPTION_LIST="help,list,version,report:"
+
+OPTION_SHORT_LIST="h,l,V,r"
+
+TEMP=$(getopt -n "$PROG" -o "$OPTION_SHORT_LIST" -l "$OPTION_LIST" -- "$@")
+eval set -- "$TEMP"
+
+
+while :; do
+  case "$1" in
+    -h | --help) show_usage
+    ;;
+    -l | --list) list
+    ;;
+    -V | --version) version
+    ;;
+    -r | --report) report
+    ;;
+    *) echo "Unrecognized option: $1" ; show_usage ; exit 1
+    ;;
+  esac
+  shift
+done
+
+
+

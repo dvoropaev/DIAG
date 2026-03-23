@@ -1,0 +1,55 @@
+name: RPM build
+
+on:
+  push:
+    branches:
+      - "master"
+
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+env:
+  HOST: altlinux.space
+  APP_NAME: adt
+
+
+jobs:
+  secrets-check:
+    runs-on: als-tiny
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+      - name: Secret scan
+        uses: actions/secret-scan-action@v1
+        with:
+          install_scaners: true
+
+  build-rpm:
+    needs: [secrets-check]
+    runs-on: als-huge
+    container:
+      image: altlinux.space/actions/runner/hasherc:sisyphus
+    strategy:
+      matrix:
+        branch: [sisyphus, p11]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: actions/build-rpm-action@main
+        name: Build RPMs
+        with:
+          branch: ${{ matrix.branch }}
+
+      - name: Remove debuginfo RPMs
+        run: |
+          find -L ~/.cache/hasherc/${{ env.APP_NAME }}/out/RPMS -type f -name '*debuginfo*.rpm' -delete
+
+      - name: Upload RPM artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: rpms-${{ matrix.branch }}
+          path: ~/.cache/hasherc/${{ env.APP_NAME }}/out/RPMS/**/*.rpm
+          if-no-files-found: error

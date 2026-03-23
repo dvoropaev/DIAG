@@ -1,0 +1,30 @@
+name = "diag_system_report"
+type = "Backend"
+module = "executor"
+interface = "diag1"
+
+[methods.Info]
+execute = "cat /usr/share/alterator/diagnostictools/system-report.diag"
+stdout_bytes = true
+thread_limit = 3
+action_id = "Info"
+exit_status = true
+
+[methods.Run]
+execute = "/usr/bin/diag-system-report {param}"
+stdout_signal_name = "diag1_stdout_signal"
+stderr_signal_name = "diag1_stderr_signal"
+action_id = "Run"
+exit_status = true
+
+[methods.List]
+execute = "/usr/bin/diag-system-report -l"
+stdout_strings = true
+action_id = "List"
+exit_status = true
+
+[methods.Report]
+execute = "/usr/bin/diag-system-report -r"
+stdout_bytes = true
+action_id = "Report"
+exit_status = true

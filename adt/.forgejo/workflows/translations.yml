@@ -1,0 +1,43 @@
+name: translation check
+
+on:
+  push:
+    branch:
+      - 'master'
+
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  translation-check:
+    runs-on: als-tiny
+    container:
+      image: registry.altlinux.org/sisyphus/node:latest
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+
+      - name: Install tools
+        run: apt-get update && apt-get install -y qt6-tools xml-utils
+
+      - name: Update language files
+        run:  lupdate-qt6 -recursive src -ts ts/* -no-obsolete
+
+      - name: Check for unfinished translations
+        shell: bash
+        run: |
+          FAILED=0
+          files=$(find ts -type f -name '*.ts')
+          for ts in $files
+          do
+            message=$(xmllint --xpath "//message[translation[@type='unfinished']]" "$ts" 2>/dev/null || true)
+            [ -z "$message" ] && continue
+
+            echo "::group::Unfinished translation in file: ${ts}"
+            echo "$message"
+            echo "::endgroup::"
+            FAILED=1
+          done
+          exit $FAILED
+
